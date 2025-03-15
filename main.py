@@ -97,7 +97,6 @@ async def init_clients():
             session_string=os.environ.get("ASSISTANT_SESSION", "")
         )
         await assistant.start()
-        # Removed frozen check message handler registration.
         py_tgcalls = PyTgCalls(assistant)
         await py_tgcalls.start()
         clients_initialized = True
@@ -230,11 +229,58 @@ def join_endpoint():
 
     return jsonify({'message': f"Successfully Joined Group/Channel: {chat}"})
 
+# New /pause endpoint to pause the media stream.
+@app.route('/pause', methods=['GET'])
+def pause():
+    chatid = request.args.get('chatid')
+    if not chatid:
+        return jsonify({'error': 'Missing chatid parameter'}), 400
+    try:
+        chat_id = int(chatid)
+    except ValueError:
+        return jsonify({'error': 'Invalid chatid parameter'}), 400
+
+    try:
+        if not clients_initialized:
+            asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
+
+        async def pause_call(cid):
+            return await py_tgcalls.pause_stream(cid)
+        asyncio.run_coroutine_threadsafe(pause_call(chat_id), tgcalls_loop).result()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    return jsonify({'message': 'Paused media', 'chatid': chatid})
+
+# New /resume endpoint to resume the paused media stream.
+@app.route('/resume', methods=['GET'])
+def resume():
+    chatid = request.args.get('chatid')
+    if not chatid:
+        return jsonify({'error': 'Missing chatid parameter'}), 400
+    try:
+        chat_id = int(chatid)
+    except ValueError:
+        return jsonify({'error': 'Invalid chatid parameter'}), 400
+
+    try:
+        if not clients_initialized:
+            asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
+
+        async def resume_call(cid):
+            return await py_tgcalls.resume_stream(cid)
+        asyncio.run_coroutine_threadsafe(resume_call(chat_id), tgcalls_loop).result()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    return jsonify({'message': 'Resumed media', 'chatid': chatid})
+
 if __name__ == '__main__':
     # Optionally initialize the clients at startup.
     asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
