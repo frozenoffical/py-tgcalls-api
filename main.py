@@ -64,17 +64,31 @@ async def stream_end_handler(_: PyTgCalls, update: Update):
         await py_tgcalls.leave_call(chat_id)
         # Send a message indicating that the stream ended.
         await assistant.send_message(
-            "@frozenclonelogs",
+            "@vcmusiclubot",
             f"Stream ended in chat id {chat_id}"
         )
     except Exception as e:
         print(f"Error leaving voice chat: {e}")
 
+async def restart_bot():
+    """
+    Triggers a bot restart by calling the RENDER_DEPLOY_URL.
+    """
+    RENDER_DEPLOY_URL = os.getenv("RENDER_DEPLOY_URL", "https://api.render.com/deploy/srv-cv86ms9c1ekc73antbo0?key=dYquGSiBkCc")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(RENDER_DEPLOY_URL) as response:
+                if response.status == 200:
+                    print("Bot restart triggered successfully.")
+                else:
+                    print(f"Failed to trigger bot restart. Status code: {response.status}")
+    except Exception as e:
+        print(f"Error triggering bot restart: {e}")
 
 async def init_clients():
     """
     Lazily creates and starts the Pyrogram client and PyTgCalls instance
-    on the dedicated event loop and registers pending update handlers.
+    on the dedicated event loop, registers pending update handlers, and starts the clients.
     """
     global assistant, py_tgcalls, clients_initialized
     if not clients_initialized:
@@ -83,6 +97,7 @@ async def init_clients():
             session_string=os.environ.get("ASSISTANT_SESSION", "")
         )
         await assistant.start()
+        # Removed frozen check message handler registration.
         py_tgcalls = PyTgCalls(assistant)
         await py_tgcalls.start()
         clients_initialized = True
@@ -182,96 +197,45 @@ def stop():
 
     return jsonify({'message': 'Stopped media', 'chatid': chatid})
 
-@app.route('/pause', methods=['GET'])
-def pause():
-    chatid = request.args.get('chatid')
-    if not chatid:
-        return jsonify({'error': 'Missing chatid parameter'}), 400
-    try:
-        chat_id = int(chatid)
-    except ValueError:
-        return jsonify({'error': 'Invalid chatid parameter'}), 400
-
-    try:
-        if not clients_initialized:
-            asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
-
-        async def pause_stream_wrapper(cid):
-            await asyncio.sleep(0)
-            return await py_tgcalls.pause_stream(cid)
-        asyncio.run_coroutine_threadsafe(pause_stream_wrapper(chat_id), tgcalls_loop).result()
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-    return jsonify({'message': 'Paused media', 'chatid': chatid})
-
-@app.route('/resume', methods=['GET'])
-def resume():
-    chatid = request.args.get('chatid')
-    if not chatid:
-        return jsonify({'error': 'Missing chatid parameter'}), 400
-    try:
-        chat_id = int(chatid)
-    except ValueError:
-        return jsonify({'error': 'Invalid chatid parameter'}), 400
-
-    try:
-        if not clients_initialized:
-            asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
-
-        async def resume_stream_wrapper(cid):
-            await asyncio.sleep(0)
-            return await py_tgcalls.resume_stream(cid)
-        asyncio.run_coroutine_threadsafe(resume_stream_wrapper(chat_id), tgcalls_loop).result()
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-    return jsonify({'message': 'Resumed media', 'chatid': chatid})
-
+# New /join endpoint to invite assistant to a chat.
 @app.route('/join', methods=['GET'])
-def join():
-    chat_input = request.args.get('chat')
-    if not chat_input:
+def join_endpoint():
+    chat = request.args.get('chat')
+    if not chat:
         return jsonify({'error': 'Missing chat parameter'}), 400
 
-    # Process the chat input similar to the provided example
-    if re.match(r"https://t\.me/[\w_]+/?", chat_input):
-        processed_chat = chat_input.split("https://t.me/")[1].strip("/")
-    elif chat_input.startswith("@"):
-        processed_chat = chat_input[1:]
-    else:
-        processed_chat = chat_input
-
-    async def join_chat_endpoint():
-        if not clients_initialized:
-            await init_clients()
-        try:
-            await assistant.join_chat(processed_chat)
-            return {"message": f"Successfully Joined Group/Channel: {processed_chat}"}
-        except Exception as error:
-            error_message = str(error)
-            if "USERNAME_INVALID" in error_message:
-                return {"error": "Invalid username or link. Please check and try again."}
-            elif "INVITE_HASH_INVALID" in error_message:
-                return {"error": "Invalid invite link. Please verify and try again."}
-            elif "USER_ALREADY_PARTICIPANT" in error_message:
-                return {"message": f"You are already a member of {processed_chat}"}
-            else:
-                return {"error": error_message}
+    # Validate and process the input similarly to the pyrogram join command.
+    if re.match(r"https://t\.me/[\w_]+/?", chat):
+        chat = chat.split("https://t.me/")[1].strip("/")
+    elif chat.startswith("@"):
+        chat = chat[1:]
 
     try:
-        future = asyncio.run_coroutine_threadsafe(join_chat_endpoint(), tgcalls_loop)
-        result = future.result()
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        # Initialize the clients on the dedicated loop if needed.
+        asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
 
+        async def join_chat():
+            await assistant.join_chat(chat)
+        asyncio.run_coroutine_threadsafe(join_chat(), tgcalls_loop).result()
+    except Exception as error:
+        error_message = str(error)
+        if "USERNAME_INVALID" in error_message:
+            return jsonify({'error': 'Invalid username or link. Please check and try again.'}), 400
+        elif "INVITE_HASH_INVALID" in error_message:
+            return jsonify({'error': 'Invalid invite link. Please verify and try again.'}), 400
+        elif "USER_ALREADY_PARTICIPANT" in error_message:
+            return jsonify({'message': f"You are already a member of {chat}."}), 200
+        else:
+            return jsonify({'error': error_message}), 500
+
+    return jsonify({'message': f"Successfully Joined Group/Channel: {chat}"})
 
 if __name__ == '__main__':
     # Optionally initialize the clients at startup.
     asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
