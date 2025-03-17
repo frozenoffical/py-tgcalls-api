@@ -190,7 +190,6 @@ def stop():
         async def leave_call_wrapper(cid):
             await asyncio.sleep(0)
             return await py_tgcalls.leave_call(cid)
-
         asyncio.run_coroutine_threadsafe(leave_call_wrapper(chat_id), tgcalls_loop).result()
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -211,7 +210,6 @@ def join_endpoint():
         chat = chat[1:]
 
     try:
-        # Initialize the clients on the dedicated loop if needed.
         asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
 
         async def join_chat():
@@ -246,7 +244,7 @@ def pause():
             asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
 
         async def pause_call(cid):
-            return await py_tgcalls.pause_stream(cid)
+            return await py_tgcalls.pause(cid)
         asyncio.run_coroutine_threadsafe(pause_call(chat_id), tgcalls_loop).result()
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -269,7 +267,7 @@ def resume():
             asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
 
         async def resume_call(cid):
-            return await py_tgcalls.resume_stream(cid)
+            return await py_tgcalls.resume(cid)
         asyncio.run_coroutine_threadsafe(resume_call(chat_id), tgcalls_loop).result()
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -281,6 +279,7 @@ if __name__ == '__main__':
     asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
