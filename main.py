@@ -57,8 +57,8 @@ def delayed_on_update(filter_):
         return func
     return decorator
 
-@delayed_on_update(pt_filters.stream_end())  # <-- Use parentheses here
-async def stream_end_handler(_: PyTgCalls, update: StreamEnded):  # <-- Use StreamEnded type
+@delayed_on_update(pt_filters.stream_end())
+async def stream_end_handler(_: PyTgCalls, update: StreamEnded):
     chat_id = update.chat_id
     try:
         # Leave the call first.
@@ -70,10 +70,6 @@ async def stream_end_handler(_: PyTgCalls, update: StreamEnded):  # <-- Use Stre
         )
     except Exception as e:
         print(f"Error leaving voice chat: {e}")
-
-frozen_check_event = asyncio.Event()
-# Flag to ensure the frozen check loop is only started once.
-frozen_check_loop_started = False
 
 async def restart_bot():
     """
