@@ -12,3 +12,4 @@ python-dotenv
 hypercorn
 isodate
 python-dotenv
+ffprobe
