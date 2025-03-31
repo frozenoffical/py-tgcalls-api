@@ -23,6 +23,7 @@ app = Flask(__name__)
 DOWNLOAD_API_URL = "https://frozen-youtube-api-search-link-ksog.onrender.com/download?url="
 
 # Caching setup
+search_cache = {}
 download_cache = {}
 
 # Global variables for the async clients (to be created in the dedicated loop)
@@ -124,6 +125,14 @@ async def download_audio(url):
     except Exception as e:
         raise Exception(f"Error downloading audio: {e}")
 
+@functools.lru_cache(maxsize=100)
+def search_video(title):
+    """Searches for a video using the external API and caches the result."""
+    search_response = requests.get(f"https://odd-block-a945.tenopno.workers.dev/search?title={title}")
+    if search_response.status_code != 200:
+        return None
+    return search_response.json()
+
 async def play_media(chat_id, video_url, title):
     """Downloads and plays the media in the specified chat."""
     media_path = await download_audio(video_url)
@@ -135,20 +144,24 @@ async def play_media(chat_id, video_url, title):
         )
     )
 
-# Updated /play endpoint that expects a direct YouTube URL via the "url" parameter.
 @app.route('/play', methods=['GET'])
 def play():
     chatid = request.args.get('chatid')
-    video_url = request.args.get('url')
-    if not chatid or not video_url:
-        return jsonify({'error': 'Missing chatid or url parameter'}), 400
+    title = request.args.get('title')
+    if not chatid or not title:
+        return jsonify({'error': 'Missing chatid or title parameter'}), 400
     try:
         chat_id = int(chatid)
     except ValueError:
         return jsonify({'error': 'Invalid chatid parameter'}), 400
 
-    # For the title, you can simply set it to the URL or customize as needed.
-    video_title = video_url
+    search_result = search_video(title)
+    if not search_result:
+        return jsonify({'error': 'Failed to search video'}), 500
+    video_url = search_result.get("link")
+    video_title = search_result.get("title")
+    if not video_url:
+        return jsonify({'error': 'No video found'}), 404
 
     try:
         # Initialize the clients on the dedicated loop if needed.
