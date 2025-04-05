@@ -113,7 +113,8 @@ async def download_audio(url):
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
         file_name = temp_file.name
         download_url = f"{DOWNLOAD_API_URL}{url}"
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=90)  # Set timeout to 90 seconds
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(download_url) as response:
                 if response.status == 200:
                     with open(file_name, 'wb') as f:
