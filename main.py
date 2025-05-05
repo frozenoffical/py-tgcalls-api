@@ -15,7 +15,7 @@ from pytgcalls.types.stream import StreamEnded
 app = Flask(__name__)
 
 # Download API URL
-DOWNLOAD_API_URL = "https://frozenyoutubeapisearchlink-production.up.railway.app/download?url="
+DOWNLOAD_API_URL = "https://frozen-youtube-api-search-link-b89x.onrender.com/download?url="
 
 # Caching setup for downloads
 download_cache = {}
