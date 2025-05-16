@@ -117,38 +117,6 @@ def play():
 
     return jsonify({'message': 'Playing media', 'chatid': chatid, 'url': video_url})
 
-@app.route('/prefetch', methods=['GET'])
-def prefetch():
-    video_url = request.args.get('url')
-    if not video_url:
-        return jsonify({'error': 'Missing url parameter'}), 400
-
-    try:
-        asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
-
-        async def prefetch_audio(url):
-            if url in download_cache:
-                return {
-                    'status': 'cached',
-                    'url': url,
-                    'path': download_cache[url]
-                }
-            file_path = await download_audio(url)  # This will also cache it
-            return {
-                'status': 'downloaded',
-                'url': url,
-                'path': file_path
-            }
-
-        result = asyncio.run_coroutine_threadsafe(
-            prefetch_audio(video_url),
-            tgcalls_loop
-        ).result()
-        return jsonify(result)
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 
 @app.route('/stop', methods=['GET'])
 def stop():
