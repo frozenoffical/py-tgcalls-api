@@ -117,7 +117,6 @@ def play():
 
     return jsonify({'message': 'Playing media', 'chatid': chatid, 'url': video_url})
 
-
 @app.route('/stop', methods=['GET'])
 def stop():
     chatid = request.args.get('chatid')
@@ -210,6 +209,19 @@ def resume():
         return jsonify({'error': str(e)}), 500
 
     return jsonify({'message': 'Resumed media', 'chatid': chatid})
+
+# New endpoint: cache a song for faster future playback
+@app.route('/cache', methods=['GET'])
+def cache_song():
+    url = request.args.get('url')
+    if not url:
+        return jsonify({'error': 'Missing url parameter'}), 400
+    try:
+        # Download and cache the audio file
+        file_path = asyncio.run_coroutine_threadsafe(download_audio(url), tgcalls_loop).result()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    return jsonify({'message': 'Song cached successfully', 'url': url})
 
 if __name__ == '__main__':
     asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
