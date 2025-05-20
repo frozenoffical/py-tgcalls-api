@@ -14,8 +14,11 @@ from pytgcalls.types.stream import StreamEnded
 # Initialize Flask app
 app = Flask(__name__)
 
-# Download API URL
-DOWNLOAD_API_URL = "https://polite-tilly-vibeshiftbotss-a46821c0.koyeb.app/download?url="
+# Define multiple Download APIs
+DOWNLOAD_APIS = {
+    'default': os.environ.get('DOWNLOAD_API_URL', 'https://frozen-youtube-api-search-link-b89x.onrender.com/download?url='),
+    'secondary': os.environ.get('SECONDARY_DOWNLOAD_API_URL', 'https://polite-tilly-vibeshiftbotss-a46821c0.koyeb.app/download?url='),
+}
 
 # Caching setup for downloads
 download_cache = {}
@@ -32,6 +35,7 @@ def start_loop(loop):
     loop.run_forever()
 
 tgcalls_thread = threading.Thread(target=start_loop, args=(tgcalls_loop,), daemon=True)
+
 tgcalls_thread.start()
 
 pending_update_handlers = []
@@ -68,28 +72,30 @@ async def init_clients():
         for filter_, handler in pending_update_handlers:
             py_tgcalls.on_update(filter_)(handler)
 
-async def download_audio(url):
-    if url in download_cache:
-        return download_cache[url]
+async def download_audio(url: str, api_base: str) -> str:
+    cache_key = f"{api_base}|{url}"
+    if cache_key in download_cache:
+        return download_cache[cache_key]
     try:
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
         file_name = temp_file.name
-        download_url = f"{DOWNLOAD_API_URL}{url}"
+        download_url = f"{api_base}{url}"
         timeout = aiohttp.ClientTimeout(total=90)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(download_url) as response:
                 if response.status == 200:
                     with open(file_name, 'wb') as f:
                         f.write(await response.read())
-                    download_cache[url] = file_name
+                    download_cache[cache_key] = file_name
                     return file_name
                 else:
                     raise Exception(f"Failed to download audio. HTTP status: {response.status}")
     except Exception as e:
         raise Exception(f"Error downloading audio: {e}")
 
-async def play_media(chat_id, video_url):
-    media_path = await download_audio(video_url)
+async def play_media(chat_id: int, video_url: str, api_name: str):
+    api_base = DOWNLOAD_APIS.get(api_name, DOWNLOAD_APIS['default'])
+    media_path = await download_audio(video_url, api_base)
     await py_tgcalls.play(
         chat_id,
         MediaStream(
@@ -102,6 +108,7 @@ async def play_media(chat_id, video_url):
 def play():
     chatid = request.args.get('chatid')
     video_url = request.args.get('url')
+    api_name = request.args.get('api', 'default')
     if not chatid or not video_url:
         return jsonify({'error': 'Missing chatid or url parameter'}), 400
     try:
@@ -109,13 +116,16 @@ def play():
     except ValueError:
         return jsonify({'error': 'Invalid chatid parameter'}), 400
 
+    if api_name not in DOWNLOAD_APIS:
+        return jsonify({'error': f"Invalid api parameter. Choose from {list(DOWNLOAD_APIS.keys())}"}), 400
+
     try:
         asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
-        asyncio.run_coroutine_threadsafe(play_media(chat_id, video_url), tgcalls_loop).result()
+        asyncio.run_coroutine_threadsafe(play_media(chat_id, video_url, api_name), tgcalls_loop).result()
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-    return jsonify({'message': 'Playing media', 'chatid': chatid, 'url': video_url})
+    return jsonify({'message': 'Playing media', 'chatid': chatid, 'url': video_url, 'api': api_name})
 
 @app.route('/stop', methods=['GET'])
 def stop():
@@ -214,19 +224,23 @@ def resume():
 @app.route('/cache', methods=['GET'])
 def cache_song():
     url = request.args.get('url')
+    api_name = request.args.get('api', 'default')
     if not url:
         return jsonify({'error': 'Missing url parameter'}), 400
+    if api_name not in DOWNLOAD_APIS:
+        return jsonify({'error': f"Invalid api parameter. Choose from {list(DOWNLOAD_APIS.keys())}"}), 400
     try:
-        # Download and cache the audio file
-        file_path = asyncio.run_coroutine_threadsafe(download_audio(url), tgcalls_loop).result()
+        api_base = DOWNLOAD_APIS[api_name]
+        file_path = asyncio.run_coroutine_threadsafe(download_audio(url, api_base), tgcalls_loop).result()
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    return jsonify({'message': 'Song cached successfully', 'url': url})
+    return jsonify({'message': 'Song cached successfully', 'url': url, 'api': api_name})
 
 if __name__ == '__main__':
     asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
