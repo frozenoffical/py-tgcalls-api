@@ -17,7 +17,7 @@ app = Flask(__name__)
 # Define multiple Download APIs
 DOWNLOAD_APIS = {
     'default': os.environ.get('DOWNLOAD_API_URL', 'https://frozen-youtube-api-search-link-b89x.onrender.com/download?url='),
-    'secondary': os.environ.get('SECONDARY_DOWNLOAD_API_URL', 'https://polite-tilly-vibeshiftbotss-a46821c0.koyeb.app/download?url='),
+    'secondary': os.environ.get('SECONDARY_DOWNLOAD_API_URL', 'http://68.183.106.44:5000/download?url='),
 }
 
 # Caching setup for downloads
