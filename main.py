@@ -16,8 +16,9 @@ app = Flask(__name__)
 
 # Define multiple Download APIs
 DOWNLOAD_APIS = {
-    'default': os.environ.get('DOWNLOAD_API_URL', 'http://68.183.106.44:8000/download?url='),
+    'default': os.environ.get('DOWNLOAD_API_URL', 'http://68.183.106.44:8000/downlo1ad?url='),
     'secondary': os.environ.get('SECONDARY_DOWNLOAD_API_URL', 'https://polite-tilly-vibeshiftbotss-a46821c0.koyeb.app/download?url='),
+    'tertiary': os.environ.get('TERTIARY_DOWNLOAD_API_URL', 'https://frozen-youtube-api-search-link-b89x.onrender.com/download?url=')
 }
 
 # Caching setup for downloads
@@ -72,26 +73,38 @@ async def init_clients():
         for filter_, handler in pending_update_handlers:
             py_tgcalls.on_update(filter_)(handler)
 
-async def download_audio(url: str, api_base: str) -> str:
-    cache_key = f"{api_base}|{url}"
+async def download_audio(url: str, api_name: str) -> str:
+    # build ordered list of bases to try:
+    bases = [
+        DOWNLOAD_APIS.get(api_name, DOWNLOAD_APIS['default']),
+        DOWNLOAD_APIS['secondary'],
+        DOWNLOAD_APIS['tertiary'],
+    ]
+    cache_key = f"{url}"
     if cache_key in download_cache:
         return download_cache[cache_key]
-    try:
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-        file_name = temp_file.name
-        download_url = f"{api_base}{url}"
-        timeout = aiohttp.ClientTimeout(total=90)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(download_url) as response:
-                if response.status == 200:
+
+    last_error = None
+    for api_base in bases:
+        try:
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+            file_name = temp_file.name
+            download_url = f"{api_base}{url}"
+            timeout = aiohttp.ClientTimeout(total=90)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(download_url) as response:
+                    response.raise_for_status()
                     with open(file_name, 'wb') as f:
                         f.write(await response.read())
-                    download_cache[cache_key] = file_name
-                    return file_name
-                else:
-                    raise Exception(f"Failed to download audio. HTTP status: {response.status}")
-    except Exception as e:
-        raise Exception(f"Error downloading audio: {e}")
+            download_cache[cache_key] = file_name
+            return file_name
+        except Exception as e:
+            last_error = e
+            # log and try next API
+            print(f"[download_audio] failed with {api_base}: {e}")
+
+    # if we get here, all APIs failed
+    raise Exception(f"All download APIs failed. Last error: {last_error}")
 
 async def play_media(chat_id: int, video_url: str, api_name: str):
     api_base = DOWNLOAD_APIS.get(api_name, DOWNLOAD_APIS['default'])
@@ -240,6 +253,7 @@ if __name__ == '__main__':
     asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
