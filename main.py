@@ -16,7 +16,7 @@ app = Flask(__name__)
 
 # Define multiple Download APIs
 DOWNLOAD_APIS = {
-    'default': os.environ.get('DOWNLOAD_API_URL', 'https://frozen-youtube-api-search-link-b89x.onrender.com/download?url='),
+    'default': os.environ.get('DOWNLOAD_API_URL', 'https://yt-api-pvt.vercel.app/api/down?url='),
     'secondary': os.environ.get('SECONDARY_DOWNLOAD_API_URL', 'https://polite-tilly-vibeshiftbotss-a46821c0.koyeb.app/download?url='),
     'tertiary': os.environ.get('TERTIARY_DOWNLOAD_API_URL', 'https://frozen-youtube-api-search-link-b89x.onrender.com/download?url=')
 }
