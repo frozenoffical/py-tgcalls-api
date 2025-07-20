@@ -74,7 +74,7 @@ async def init_clients():
     if not clients_initialized:
         assistant = Client(
             "assistant_account",
-            session_string=os.environ.get("ASSISTANT_SESSION", "BQHDLbkAPXfWdfBWiuTLZY8GIUyH9wef5Xb2AYCe1OnF9GWc_DaV0FA-pqam2za85Dn1i8a9wKF38rBeYbBDH5cHUSPMoFgGTCok0me7UpB0wPd_I8PAu0FP5kvPCe5115139qLV67uOjh5ESbEax5gtqXqlHUucW_FNChDmgtBxypOJvxGQq-sWDVqTjA2XD1kTF3GBAgz586Pl4dxAA3_a9xLdG_7d_HLjn_5Hl_fVBiApGMzaoYrSOFxXvYsYLlplweI6hXYUckHQaeikFmFZN9pdmsLnF76DKwPk0iyQ2S0FXYVnYk277QgAq61EbW__cVcAVitJAcRR6jz7JZw4ytR71wAAAAGHTif4AA")
+            session_string=os.environ.get("ASSISTANT_SESSION", "")
         )
         await assistant.start()
         py_tgcalls = PyTgCalls(assistant)
