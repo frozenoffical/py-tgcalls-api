@@ -14,7 +14,7 @@ from pytgcalls.types.stream import StreamEnded
 # Initialize Flask app
 app = Flask(__name__)
 
-# Define multiple Download APIs
+# Define multiple Download API
 DOWNLOAD_APIS = {
     'default': os.environ.get(
         'DOWNLOAD_API_URL',
