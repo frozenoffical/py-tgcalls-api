@@ -18,7 +18,7 @@ app = Flask(__name__)
 DOWNLOAD_APIS = {
     'default': os.environ.get(
         'DOWNLOAD_API_URL',
-        'https://ytapiii-8bced95bfad6.herokuapp.com/download?url='
+        'https://frozen-youtube-api-search-link-b89x.onrender.com/download?url='
     ),
     'secondary': os.environ.get(
         'SECONDARY_DOWNLOAD_API_URL',
