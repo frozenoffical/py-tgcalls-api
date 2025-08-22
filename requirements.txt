@@ -1,4 +1,4 @@
-pyrogram==2.0.106
+kurigram==2.2.4
 py-tgcalls
 yt-dlp
 aiohttp
