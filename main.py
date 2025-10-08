@@ -26,7 +26,7 @@ DOWNLOAD_APIS = {
     ),
     'tertiary': os.environ.get(
         'TERTIARY_DOWNLOAD_API_URL',
-        'https://polite-tilly-vibeshiftbotss-a46821c0.koyeb.app/download?url='
+        'https://ytapi-df6f5442e070.herokuapp.com/download?url='
     )
 }
 
