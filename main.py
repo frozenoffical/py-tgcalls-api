@@ -2,18 +2,16 @@ import asyncio
 import tempfile
 import aiohttp
 import os
-import threading
 import re
-from flask import Flask, request, jsonify
+from quart import Quart, request, jsonify
 from pyrogram import Client
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream
 from pytgcalls import filters as pt_filters
 from pytgcalls.types.stream import StreamEnded
 
-# Initialize Flask app
-app = Flask(__name__)
-
+# Initialize Quart app (High concurrency async replacement for Flask)
+app = Quart(__name__)
 
 DOWNLOAD_APIS = {
     'default': os.environ.get(
@@ -32,24 +30,17 @@ DOWNLOAD_APIS = {
 
 # Caching setup for downloads
 download_cache = {}
+# Lock to prevent simultaneous downloads of the same URL
+download_locks = {}
 
 # Globals for the Telegram clients
 assistant = None
 py_tgcalls = None
 clients_initialized = False
 
-# Dedicated loop & thread for PyTgCalls
-tgcalls_loop = asyncio.new_event_loop()
-def start_loop(loop):
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
-tgcalls_thread = threading.Thread(
-    target=start_loop, args=(tgcalls_loop,), daemon=True
-)
-tgcalls_thread.start()
-
-# Collect handlers before init
+# Temporary storage for handlers before client init
 pending_update_handlers = []
+
 def delayed_on_update(filter_):
     def decorator(func):
         pending_update_handlers.append((filter_, func))
@@ -61,6 +52,7 @@ async def stream_end_handler(_: PyTgCalls, update: StreamEnded):
     chat_id = update.chat_id
     try:
         await py_tgcalls.leave_call(chat_id)
+        # Using the global assistant client to send the message
         await assistant.send_message(
             "@vcmusiclubot",
             f"Stream ended in chat id {chat_id}"
@@ -68,51 +60,93 @@ async def stream_end_handler(_: PyTgCalls, update: StreamEnded):
     except Exception as e:
         print(f"Error leaving voice chat: {e}")
 
-# Initialize Pyrogram + PyTgCalls once
-async def init_clients():
+# Lifecycle: Initialize Clients on Startup
+@app.before_serving
+async def startup():
     global assistant, py_tgcalls, clients_initialized
     if not clients_initialized:
+        print("Initializing Clients...")
         assistant = Client(
             "assistant_account",
             session_string=os.environ.get("ASSISTANT_SESSION", "")
         )
         await assistant.start()
         py_tgcalls = PyTgCalls(assistant)
-        await py_tgcalls.start()
-        clients_initialized = True
+        
+        # Register pending handlers
         for filter_, handler in pending_update_handlers:
             py_tgcalls.on_update(filter_)(handler)
+            
+        await py_tgcalls.start()
+        clients_initialized = True
+        print("Clients Initialized Successfully.")
 
-# Download helper: ONLY use the single API key requested
+# Lifecycle: Cleanup on Shutdown
+@app.after_serving
+async def cleanup():
+    global clients_initialized
+    if clients_initialized:
+        print("Stopping Clients...")
+        # Gracefully stop pytgcalls if needed, though usually just stopping the loop is enough
+        # await py_tgcalls.stop() 
+        await assistant.stop()
+        clients_initialized = False
+
+# Download helper: Optimized with concurrency locks but keeping file write logic same
 async def download_audio(url: str, api_name: str) -> str:
     if api_name not in DOWNLOAD_APIS:
         raise ValueError(
             f"Unknown API key: {api_name!r}. "
             f"Choose from {list(DOWNLOAD_APIS.keys())}."
         )
-    api_base = DOWNLOAD_APIS[api_name]
-    cache_key = url
-    if cache_key in download_cache:
-        return download_cache[cache_key]
+    
+    # Check cache first
+    if url in download_cache:
+        # Verify file actually exists
+        if os.path.exists(download_cache[url]):
+            return download_cache[url]
+        else:
+            del download_cache[url]
 
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-    file_name = temp_file.name
-    download_url = f"{api_base}{url}"
-    timeout = aiohttp.ClientTimeout(total=90)
+    # Use a lock for this specific URL to prevent race conditions during high concurrency
+    if url not in download_locks:
+        download_locks[url] = asyncio.Lock()
+    
+    async with download_locks[url]:
+        # Check cache again after acquiring lock (in case another request finished it)
+        if url in download_cache and os.path.exists(download_cache[url]):
+            return download_cache[url]
 
-    try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(download_url) as response:
-                response.raise_for_status()
-                with open(file_name, 'wb') as f:
-                    f.write(await response.read())
+        api_base = DOWNLOAD_APIS[api_name]
+        
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+        file_name = temp_file.name
+        temp_file.close() # Close handle so we can open fresh
+        
+        download_url = f"{api_base}{url}"
+        timeout = aiohttp.ClientTimeout(total=90)
 
-        download_cache[cache_key] = file_name
-        return file_name
-    except Exception as e:
-        raise Exception(f"Download via '{api_name}' failed: {e}")
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(download_url) as response:
+                    response.raise_for_status()
+                    # Stream to disk to save RAM (64KB chunks)
+                    with open(file_name, 'wb') as f:
+                        async for chunk in response.content.iter_chunked(64 * 1024):
+                            f.write(chunk)
 
-# Play helper: pass api_name, not a URL
+            download_cache[url] = file_name
+            return file_name
+        except Exception as e:
+            if os.path.exists(file_name):
+                os.remove(file_name)
+            raise Exception(f"Download via '{api_name}' failed: {e}")
+        finally:
+            # Cleanup lock key to prevent memory leak over long uptime
+            if url in download_locks:
+                del download_locks[url]
+
+# Play helper
 async def play_media(chat_id: int, video_url: str, api_name: str):
     media_path = await download_audio(video_url, api_name)
     await py_tgcalls.play(
@@ -125,10 +159,9 @@ async def play_media(chat_id: int, video_url: str, api_name: str):
 
 # /play endpoint
 @app.route('/play', methods=['GET'])
-def play():
-    chatid    = request.args.get('chatid')
+async def play():
+    chatid = request.args.get('chatid')
     video_url = request.args.get('url')
-    # If 'api' is missing or blank, this defaults to '1'
     api_param = request.args.get('api') or '1'
 
     # 1) Validate required params
@@ -139,7 +172,7 @@ def play():
     except ValueError:
         return jsonify({'error': 'Invalid chatid parameter'}), 400
 
-    # 2) Map numeric selector → DOWNLOAD_APIS key
+    # 2) Map numeric selector -> DOWNLOAD_APIS key
     api_map = {'1': 'default', '2': 'secondary', '3': 'tertiary'}
     if api_param not in api_map:
         return jsonify({
@@ -147,13 +180,13 @@ def play():
         }), 400
     api_key = api_map[api_param]
 
-    # 3) Initialize clients and start playback
+    # 3) Start playback (Async)
     try:
-        asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
-        asyncio.run_coroutine_threadsafe(
-            play_media(chat_id, video_url, api_key),
-            tgcalls_loop
-        ).result()
+        if not clients_initialized:
+            # This should be handled by startup(), but redundant check for safety
+            return jsonify({'error': 'Server starting up, please wait.'}), 503
+            
+        await play_media(chat_id, video_url, api_key)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -167,7 +200,7 @@ def play():
 
 # /cache endpoint
 @app.route('/cache', methods=['GET'])
-def cache_song():
+async def cache_song():
     url = request.args.get('url')
     if not url:
         return jsonify({'error': 'Missing url parameter'}), 400
@@ -176,10 +209,7 @@ def cache_song():
 
     # 1) Try default API
     try:
-        file_path = asyncio.run_coroutine_threadsafe(
-            download_audio(url, 'default'),
-            tgcalls_loop
-        ).result()
+        await download_audio(url, 'default')
         return jsonify({
             'message':    'Song cached successfully',
             'url':        url,
@@ -190,10 +220,7 @@ def cache_song():
 
     # 2) Fallback to secondary API
     try:
-        file_path = asyncio.run_coroutine_threadsafe(
-            download_audio(url, 'secondary'),
-            tgcalls_loop
-        ).result()
+        await download_audio(url, 'secondary')
         return jsonify({
             'message':    'Song cached successfully',
             'url':        url,
@@ -208,10 +235,9 @@ def cache_song():
         'details': errors
     }), 500
 
-# (Your other endpoints: /stop, /join, /pause, /resume remain unchanged)
 
 @app.route('/stop', methods=['GET'])
-def stop():
+async def stop():
     chatid = request.args.get('chatid')
     if not chatid:
         return jsonify({'error': 'Missing chatid parameter'}), 400
@@ -222,22 +248,17 @@ def stop():
 
     try:
         if not clients_initialized:
-            asyncio.run_coroutine_threadsafe(
-                init_clients(), tgcalls_loop
-            ).result()
-        async def leave_call_wrapper(cid):
-            await asyncio.sleep(0)
-            return await py_tgcalls.leave_call(cid)
-        asyncio.run_coroutine_threadsafe(
-            leave_call_wrapper(chat_id), tgcalls_loop
-        ).result()
+            return jsonify({'error': 'Clients not initialized'}), 503
+            
+        await py_tgcalls.leave_call(chat_id)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
     return jsonify({'message': 'Stopped media', 'chatid': chatid})
 
+
 @app.route('/join', methods=['GET'])
-def join_endpoint():
+async def join_endpoint():
     chat = request.args.get('chat')
     if not chat:
         return jsonify({'error': 'Missing chat parameter'}), 400
@@ -248,14 +269,10 @@ def join_endpoint():
         chat = chat[1:]
 
     try:
-        asyncio.run_coroutine_threadsafe(
-            init_clients(), tgcalls_loop
-        ).result()
-        async def join_chat():
-            await assistant.join_chat(chat)
-        asyncio.run_coroutine_threadsafe(
-            join_chat(), tgcalls_loop
-        ).result()
+        if not clients_initialized:
+            return jsonify({'error': 'Clients not initialized'}), 503
+            
+        await assistant.join_chat(chat)
     except Exception as error:
         err = str(error)
         if "USERNAME_INVALID" in err:
@@ -271,8 +288,9 @@ def join_endpoint():
 
     return jsonify({'message': f"Successfully Joined: {chat}"})
 
+
 @app.route('/pause', methods=['GET'])
-def pause():
+async def pause():
     chatid = request.args.get('chatid')
     if not chatid:
         return jsonify({'error': 'Missing chatid parameter'}), 400
@@ -283,21 +301,17 @@ def pause():
 
     try:
         if not clients_initialized:
-            asyncio.run_coroutine_threadsafe(
-                init_clients(), tgcalls_loop
-            ).result()
-        async def pause_call(cid):
-            return await py_tgcalls.pause(cid)
-        asyncio.run_coroutine_threadsafe(
-            pause_call(chat_id), tgcalls_loop
-        ).result()
+            return jsonify({'error': 'Clients not initialized'}), 503
+            
+        await py_tgcalls.pause(chat_id)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
     return jsonify({'message': 'Paused media', 'chatid': chatid})
 
+
 @app.route('/resume', methods=['GET'])
-def resume():
+async def resume():
     chatid = request.args.get('chatid')
     if not chatid:
         return jsonify({'error': 'Missing chatid parameter'}), 400
@@ -308,21 +322,16 @@ def resume():
 
     try:
         if not clients_initialized:
-            asyncio.run_coroutine_threadsafe(
-                init_clients(), tgcalls_loop
-            ).result()
-        async def resume_call(cid):
-            return await py_tgcalls.resume(cid)
-        asyncio.run_coroutine_threadsafe(
-            resume_call(chat_id), tgcalls_loop
-        ).result()
+            return jsonify({'error': 'Clients not initialized'}), 503
+            
+        await py_tgcalls.resume(chat_id)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
     return jsonify({'message': 'Resumed media', 'chatid': chatid})
 
+
 if __name__ == '__main__':
-    # Ensure clients are initialized before serving
-    asyncio.run_coroutine_threadsafe(init_clients(), tgcalls_loop).result()
     port = int(os.environ.get("PORT", 8000))
+    # Hypercorn/Uvicorn is recommended for production, but app.run() works for Quart dev
     app.run(host="0.0.0.0", port=port)
