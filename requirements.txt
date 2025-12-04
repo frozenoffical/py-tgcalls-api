@@ -13,3 +13,4 @@ hypercorn
 isodate
 python-dotenv
 ffprobe
+quart
