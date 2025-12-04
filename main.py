@@ -21,11 +21,11 @@ DOWNLOAD_APIS = {
     ),
     'secondary': os.environ.get(
         'SECONDARY_DOWNLOAD_API_URL',
-        'https://frozen-youtube-api-search-link-b89x.onrender.com/download?url='
+        'https://yt-api-1772586ebdd2.herokuapp.com/download?url='
     ),
     'tertiary': os.environ.get(
         'TERTIARY_DOWNLOAD_API_URL',
-        'https://ytapi-df6f5442e070.herokuapp.com/download?url='
+        'https://frozen-youtube-api-search-link-b89x.onrender.com/download?url='
     )
 }
 
