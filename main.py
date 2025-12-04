@@ -3,6 +3,7 @@ import tempfile
 import aiohttp
 import os
 import re
+import sys
 from quart import Quart, request, jsonify
 from pyrogram import Client
 from pytgcalls import PyTgCalls
@@ -330,6 +331,15 @@ async def resume():
 
     return jsonify({'message': 'Resumed media', 'chatid': chatid})
 
+@app.route('/restart', methods=['GET'])
+async def restart():
+    # Schedule the exit to allow the response to return first
+    async def _restart_process():
+        await asyncio.sleep(1)
+        sys.exit(1)
+    
+    asyncio.create_task(_restart_process())
+    return jsonify({'message': 'Restarting application...'})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8000))
